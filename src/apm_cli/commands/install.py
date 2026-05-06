@@ -933,7 +933,7 @@ def _handle_mcp_install(
     help=(
         "MCP registry URL (http:// or https://) for resolving --mcp NAME. "
         "Overrides the MCP_REGISTRY_URL env var. Default: "
-        "https://api.mcp.github.com. Captured in apm.yml on the entry's "
+        "https://registry.modelcontextprotocol.io. Captured in apm.yml on the entry's "
         "'registry:' field for auditability. Not valid with --url "
         "or a stdio command (self-defined entries)."
     ),

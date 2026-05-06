@@ -14,8 +14,22 @@ class TestSimpleRegistryClient(unittest.TestCase):
     """Test cases for the MCP registry client."""
 
     def setUp(self):
-        """Set up test fixtures."""
+        """Set up test fixtures.
+
+        Disables the on-disk HTTP cache so previously-cached real
+        registry responses (e.g. from running ``apm mcp list``) cannot
+        short-circuit a mocked ``requests.Session.get`` and feed real
+        bodies into the test assertions.
+        """
+        self._saved_no_cache = os.environ.get("APM_NO_CACHE")
+        os.environ["APM_NO_CACHE"] = "1"
         self.client = SimpleRegistryClient()
+
+    def tearDown(self):
+        if self._saved_no_cache is None:
+            os.environ.pop("APM_NO_CACHE", None)
+        else:
+            os.environ["APM_NO_CACHE"] = self._saved_no_cache
 
     @mock.patch("requests.Session.get")
     def test_list_servers(self, mock_get):
@@ -90,10 +104,13 @@ class TestSimpleRegistryClient(unittest.TestCase):
         # Call the method with a search query
         results = self.client.search_servers("test")
 
-        # Assertions
+        # Assertions: search_servers prefers the official
+        # ``/v0/servers?search=`` endpoint; the legacy
+        # ``/v0/servers/search?q=`` form is only used as a fallback
+        # when the official endpoint 404s (deprecated mirrors).
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers/search",
-            params={"q": "test"},
+            f"{self.client.registry_url}/v0/servers",
+            params={"search": "test"},
             timeout=self.client._timeout,
         )
         self.assertEqual(len(results), 2)
@@ -210,11 +227,17 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertEqual(result, server_data)
         mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
 
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
-    def test_find_server_by_reference_uuid_not_found(self, mock_get_server_info):
+    def test_find_server_by_reference_uuid_not_found(
+        self, mock_get_server_info, mock_search_servers
+    ):
         """Test finding a server by UUID that doesn't exist."""
-        # Mock get_server_info to raise ValueError
+        # Mock get_server_info to raise ValueError, then the fallback
+        # search must also return empty so the lookup short-circuits
+        # without hitting the live registry.
         mock_get_server_info.side_effect = ValueError("Server not found")
+        mock_search_servers.return_value = []
 
         # Call the method with UUID
         result = self.client.find_server_by_reference("123e4567-e89b-12d3-a456-426614174000")
@@ -418,7 +441,7 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
 
     def test_default_url_passes(self):
         c = SimpleRegistryClient()
-        self.assertEqual(c.registry_url, "https://api.mcp.github.com")
+        self.assertEqual(c.registry_url, "https://registry.modelcontextprotocol.io")
         self.assertFalse(c._is_custom_url)
 
     def test_explicit_https_url_passes(self):
@@ -456,13 +479,13 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
     def test_empty_env_var_treated_as_unset(self):
         os.environ["MCP_REGISTRY_URL"] = ""
         c = SimpleRegistryClient()
-        self.assertEqual(c.registry_url, "https://api.mcp.github.com")
+        self.assertEqual(c.registry_url, "https://registry.modelcontextprotocol.io")
         self.assertFalse(c._is_custom_url)
 
     def test_whitespace_only_env_var_treated_as_unset(self):
         os.environ["MCP_REGISTRY_URL"] = "   "
         c = SimpleRegistryClient()
-        self.assertEqual(c.registry_url, "https://api.mcp.github.com")
+        self.assertEqual(c.registry_url, "https://registry.modelcontextprotocol.io")
         self.assertFalse(c._is_custom_url)
 
     def test_env_var_override_marks_custom(self):

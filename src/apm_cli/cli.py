@@ -35,6 +35,7 @@ from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
+from apm_cli.commands.skills import skills
 from apm_cli.commands.uninstall import uninstall
 from apm_cli.commands.update import update
 from apm_cli.commands.view import view as view_cmd
@@ -97,6 +98,7 @@ cli.add_command(config)
 cli.add_command(experimental)
 cli.add_command(runtime)
 cli.add_command(mcp)
+cli.add_command(skills)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(marketplace)
