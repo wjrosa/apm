@@ -18,7 +18,7 @@ def _safe_headers(response) -> dict[str, str]:
         return {}
 
 
-_DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
+_DEFAULT_REGISTRY_URL = "https://registry.modelcontextprotocol.io"
 
 # Network timeouts for registry HTTP calls. ``connect`` bounds the TCP
 # handshake (typo in --registry / unreachable host) so ``apm install``
@@ -248,12 +248,23 @@ class SimpleRegistryClient:
                 servers.append(item)  # Fallback for different structure
 
         metadata = data.get("metadata", {})
-        next_cursor = metadata.get("next_cursor")
+        # The official registry uses ``nextCursor``; the deprecated
+        # ``api.mcp.github.com`` mirror (and any compatible mirrors) used
+        # ``next_cursor``. Accept both so callers don't break across
+        # registries.
+        next_cursor = metadata.get("nextCursor") or metadata.get("next_cursor")
 
         return servers, next_cursor
 
     def search_servers(self, query: str) -> list[dict[str, Any]]:
-        """Search for servers in the registry using the API search endpoint.
+        """Search for servers in the registry.
+
+        The official registry at registry.modelcontextprotocol.io exposes
+        search via ``GET /v0/servers?search=<q>``. The deprecated GitHub
+        mirror (``api.mcp.github.com``) and any compatible mirror use a
+        separate ``GET /v0/servers/search?q=<q>`` endpoint. This method
+        prefers the official form and falls back to the legacy form on
+        404 so both registries work transparently.
 
         Args:
             query (str): Search query string.
@@ -262,17 +273,26 @@ class SimpleRegistryClient:
             List[Dict[str, Any]]: List of matching server metadata dictionaries.
 
         Raises:
-            requests.RequestException: If the request fails.
+            requests.RequestException: If both endpoints fail.
         """
         # The MCP Registry API now only accepts repository names (e.g., "github-mcp-server")
         # If the query looks like a full identifier (e.g., "io.github.github/github-mcp-server"),
         # extract the repository name for the search
         search_query = self._extract_repository_name(query)
 
-        url = f"{self.registry_url}/v0/servers/search"
-        params = {"q": search_query}
+        try:
+            url = f"{self.registry_url}/v0/servers"
+            data, _hdrs = self._cached_get_json(url, params={"search": search_query})
+        except requests.HTTPError as exc:
+            # Fall back to the legacy mirror endpoint only on 404; other
+            # status codes (auth, rate-limit, 5xx) are real errors and
+            # must propagate.
+            response = getattr(exc, "response", None)
+            if response is None or response.status_code != 404:
+                raise
+            url = f"{self.registry_url}/v0/servers/search"
+            data, _hdrs = self._cached_get_json(url, params={"q": search_query})
 
-        data, _hdrs = self._cached_get_json(url, params=params)
         data = data or {}
 
         # Extract servers - they're nested under "server" key in each item
